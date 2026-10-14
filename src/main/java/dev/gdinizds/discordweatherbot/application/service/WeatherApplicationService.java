@@ -253,6 +253,21 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
             }
 
             WeatherSession session = sessionOpt.get();
+            if (session.userId() != null && !session.userId().equals(command.userId())) {
+                replyPublisher.publish(OutboundResponse.ephemeralReply(
+                        command.interactionToken(),
+                        command.originMessageId(),
+                        command.channelId(),
+                        command.correlationId(),
+                        "⚠️ Apenas quem executou o comando pode interagir com estes botões.",
+                        null
+                ));
+                recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
+                        "weather_button", "BUTTON", command.sessionId(), null, "FORBIDDEN",
+                        command.rawPayload(), "User " + command.userId() + " not authorized for session of user " + session.userId(), System.currentTimeMillis() - start);
+                return;
+            }
+
             int current = session.currentDayIndex();
             int total = session.daily().size();
 

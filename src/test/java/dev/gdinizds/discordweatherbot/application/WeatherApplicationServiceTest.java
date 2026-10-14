@@ -188,4 +188,24 @@ class WeatherApplicationServiceTest {
         verify(replyPublisher).publish(captor.capture());
         assertThat(captor.getValue().embeds().get(0).get("description").toString()).contains("expirou");
     }
+
+    @Test
+    void shouldRejectNavigationWhenUserIsNotOriginalRequester() {
+        WeatherSession session = new WeatherSession(
+                "sess1", "g1", "ch1", "uOriginal", "msg1", sampleLocation, 0, sampleDaily, Instant.now().plusSeconds(3600)
+        );
+        WeatherNavigationCommand command = new WeatherNavigationCommand(
+                "c7", "g1", "ch1", "uDifferent", "tok7", "msg1", "sess1", "next", "{}"
+        );
+
+        when(weatherSessionPort.findById("sess1")).thenReturn(Optional.of(session));
+
+        service.navigate(command);
+
+        ArgumentCaptor<OutboundResponse> captor = ArgumentCaptor.forClass(OutboundResponse.class);
+        verify(replyPublisher).publish(captor.capture());
+        OutboundResponse response = captor.getValue();
+        assertThat(response.responseType()).isEqualTo("EPHEMERAL_REPLY");
+        assertThat(response.content()).contains("Apenas quem executou o comando pode interagir");
+    }
 }

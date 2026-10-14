@@ -6,6 +6,7 @@ import dev.gdinizds.discordweatherbot.domain.model.Location;
 import dev.gdinizds.discordweatherbot.domain.model.WeatherSession;
 import dev.gdinizds.discordweatherbot.domain.service.WeatherCodeTranslator.WeatherCondition;
 
+import java.time.DayOfWeek;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,8 +16,7 @@ import java.util.Map;
 
 public class WeatherLayoutBuilder {
 
-    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy", Locale.of("pt", "BR"));
-    private static final DateTimeFormatter SHORT_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM", Locale.of("pt", "BR"));
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     public record RenderedWeather(
             String content,
@@ -34,64 +34,22 @@ public class WeatherLayoutBuilder {
 
         Map<String, Object> embed = new HashMap<>();
         embed.put("color", condition.colorHex());
+        embed.put("title", condition.emoji() + " Clima em " + location.displayName());
 
-        List<Map<String, Object>> fields = new ArrayList<>();
-
-        if (index == 0) {
-            embed.put("title", condition.emoji() + " Clima em " + location.displayName());
-            StringBuilder desc = new StringBuilder();
-            if (current != null) {
-                desc.append("### ").append(formatTemp(current.temperature()))
-                        .append(" — ").append(condition.emoji()).append(" ").append(condition.description()).append("\n");
-                desc.append("Sensação Térmica: **").append(formatTemp(current.apparentTemperature())).append("**\n");
-            } else {
-                desc.append("### ").append(formatTemp(targetDay.tempMax())).append(" / ").append(formatTemp(targetDay.tempMin()))
-                        .append(" — ").append(condition.emoji()).append(" ").append(condition.description()).append("\n");
-            }
-            embed.put("description", desc.toString());
-
-            fields.add(Map.of("name", "🌡️ Máx / Mín", "value", "🔺 " + formatTemp(targetDay.tempMax()) + " / 🔻 " + formatTemp(targetDay.tempMin()), "inline", true));
-            if (current != null) {
-                fields.add(Map.of("name", "💧 Umidade", "value", current.relativeHumidity() + "%", "inline", true));
-                fields.add(Map.of("name", "💨 Vento", "value", current.windSpeed() + " km/h", "inline", true));
-            } else {
-                fields.add(Map.of("name", "💨 Vento Máx", "value", targetDay.windSpeedMax() + " km/h", "inline", true));
-            }
-            fields.add(Map.of("name", "🌧️ Chuva", "value", targetDay.precipitationProbabilityMax() + "% (" + targetDay.precipitationSum() + " mm)", "inline", true));
-            if (targetDay.uvIndexMax() != null) {
-                fields.add(Map.of("name", "☀️ Índice UV", "value", String.format(Locale.US, "%.1f", targetDay.uvIndexMax()), "inline", true));
-            }
-            fields.add(Map.of("name", "📅 Data", "value", capitalize(targetDay.date().format(DATE_FORMATTER)), "inline", true));
-
-            if (daily.size() > 1) {
-                StringBuilder forecastSummary = new StringBuilder();
-                for (int i = 1; i < Math.min(daily.size(), 7); i++) {
-                    DailyForecast d = daily.get(i);
-                    WeatherCondition c = WeatherCodeTranslator.translate(d.weatherCode());
-                    forecastSummary.append("`").append(d.date().format(SHORT_DATE_FORMATTER)).append("` ")
-                            .append(c.emoji()).append(" ")
-                            .append(formatTemp(d.tempMin())).append(" - ").append(formatTemp(d.tempMax()))
-                            .append(" (").append(d.precipitationProbabilityMax()).append("% 🌧️)\n");
-                }
-                fields.add(Map.of("name", "🔮 Próximos Dias", "value", forecastSummary.toString(), "inline", false));
-            }
-        } else {
-            embed.put("title", "📅 Previsão para " + capitalize(targetDay.date().format(DATE_FORMATTER)) + " — " + location.displayName());
-            String desc = "### " + formatTemp(targetDay.tempMax()) + " / " + formatTemp(targetDay.tempMin()) +
-                    " — " + condition.emoji() + " " + condition.description() + "\n" +
-                    "Sensação Térmica: 🔺 **" + formatTemp(targetDay.apparentTempMax()) + "** / 🔻 **" + formatTemp(targetDay.apparentTempMin()) + "**";
-            embed.put("description", desc);
-
-            fields.add(Map.of("name", "🌡️ Máx / Mín", "value", "🔺 " + formatTemp(targetDay.tempMax()) + " / 🔻 " + formatTemp(targetDay.tempMin()), "inline", true));
-            fields.add(Map.of("name", "🌧️ Prob. de Chuva", "value", targetDay.precipitationProbabilityMax() + "%", "inline", true));
-            fields.add(Map.of("name", "💧 Volume de Chuva", "value", targetDay.precipitationSum() + " mm", "inline", true));
-            fields.add(Map.of("name", "💨 Vento Máximo", "value", targetDay.windSpeedMax() + " km/h", "inline", true));
-            if (targetDay.uvIndexMax() != null) {
-                fields.add(Map.of("name", "☀️ Índice UV Máx", "value", String.format(Locale.US, "%.1f", targetDay.uvIndexMax()), "inline", true));
-            }
+        StringBuilder desc = new StringBuilder();
+        desc.append(formatTemp(targetDay.tempMax())).append(" / ").append(formatTemp(targetDay.tempMin()))
+                .append(" — ").append(condition.emoji()).append(" ").append(condition.description()).append("\n");
+        desc.append("🌡️ Máx / Mín:🔺 ").append(formatTemp(targetDay.tempMax())).append(" / 🔻 ").append(formatTemp(targetDay.tempMin())).append("\n");
+        desc.append("💨 Vento Máx: ").append(targetDay.windSpeedMax()).append(" km/h\n");
+        desc.append("🌧️ Chuva: ").append(targetDay.precipitationProbabilityMax()).append("% (").append(targetDay.precipitationSum()).append(" mm)\n");
+        if (targetDay.uvIndexMax() != null) {
+            desc.append("☀️ Índice UV: ").append(String.format(Locale.US, "%.1f", targetDay.uvIndexMax())).append("\n");
         }
+        desc.append("📅 Data\n");
+        desc.append(formatDayOfWeek(targetDay.date().getDayOfWeek())).append(", ").append(targetDay.date().format(DATE_FORMATTER));
 
-        embed.put("fields", fields);
+        embed.put("description", desc.toString());
+        embed.put("fields", List.of());
         embed.put("footer", Map.of("text", "Dia " + (index + 1) + " de " + daily.size() + " • Open-Meteo"));
 
         List<Map<String, Object>> components = buildNavigationButtons(session.sessionId(), index, daily.size());
@@ -146,7 +104,7 @@ public class WeatherLayoutBuilder {
                 "type", 2,
                 "style", "SECONDARY",
                 "custom_id", "weather:prev:" + sessionId,
-                "label", "⬅️ Anterior",
+                "label", "◀ Anterior",
                 "disabled", currentIndex <= 0
         ));
 
@@ -162,7 +120,7 @@ public class WeatherLayoutBuilder {
                 "type", 2,
                 "style", "SECONDARY",
                 "custom_id", "weather:next:" + sessionId,
-                "label", "Próximo ➡️",
+                "label", "Próximo ▶",
                 "disabled", currentIndex >= totalDays - 1
         ));
 
@@ -176,8 +134,15 @@ public class WeatherLayoutBuilder {
         return Math.round(temp) + "°C";
     }
 
-    private static String capitalize(String text) {
-        if (text == null || text.isBlank()) return "";
-        return text.substring(0, 1).toUpperCase() + text.substring(1);
+    private static String formatDayOfWeek(DayOfWeek dayOfWeek) {
+        return switch (dayOfWeek) {
+            case MONDAY -> "Segunda";
+            case TUESDAY -> "Terça";
+            case WEDNESDAY -> "Quarta";
+            case THURSDAY -> "Quinta";
+            case FRIDAY -> "Sexta";
+            case SATURDAY -> "Sábado";
+            case SUNDAY -> "Domingo";
+        };
     }
 }
