@@ -12,6 +12,7 @@ public record WeatherSession(
         Location location,
         int currentDayIndex,
         List<DailyForecast> daily,
+        CurrentWeather current,
         Instant expiresAt
 ) {
     public WeatherSession withCurrentDayIndex(int newIndex) {
@@ -24,6 +25,7 @@ public record WeatherSession(
                 location,
                 newIndex,
                 daily,
+                current,
                 expiresAt
         );
     }

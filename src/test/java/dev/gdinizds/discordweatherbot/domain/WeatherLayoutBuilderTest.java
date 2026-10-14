@@ -27,21 +27,23 @@ class WeatherLayoutBuilderTest {
         DailyForecast day0 = new DailyForecast(LocalDate.of(2026, 10, 14), 81, 36.0, 25.0, 37.0, 25.0, 9.1, 4.0, 84, 10.5);
         DailyForecast day1 = new DailyForecast(LocalDate.of(2026, 10, 15), 81, 32.0, 25.0, 33.0, 25.0, 8.0, 3.0, 66, 9.0);
 
-        WeatherSession session = new WeatherSession("s1", "g1", "c1", "u1", "m1", location, 0, List.of(day0, day1), Instant.now().plusSeconds(3600));
+        WeatherSession session = new WeatherSession("s1", "g1", "c1", "u1", "m1", location, 0, List.of(day0, day1), current, Instant.now().plusSeconds(3600));
 
         var rendered = builder.render(session, current);
 
         assertThat(rendered.embeds()).hasSize(1);
         Map<String, Object> embed = rendered.embeds().get(0);
-        assertThat(embed.get("title").toString()).isEqualTo("🌧️ Clima em Pau Grande, RO - Brasil");
+        assertThat(embed.get("title").toString()).isEqualTo("Clima em Pau Grande, RO - Brasil");
 
         String description = embed.get("description").toString();
-        assertThat(description).contains("36°C / 25°C — 🌧️ Pancadas de chuva");
-        assertThat(description).contains("🌡️ Máx / Mín:🔺 36°C / 🔻 25°C");
-        assertThat(description).contains("💨 Vento Máx: 10.5 km/h");
-        assertThat(description).contains("🌧️ Chuva: 84% (4.0 mm)");
-        assertThat(description).contains("☀️ Índice UV: 9.1");
-        assertThat(description).contains("📅 Data\nQuarta, 14/10/2026");
+        assertThat(description).contains("**30°C - 🌧️ Pancadas de chuva");
+        assertThat(description).contains("🌡️ **Máx / Mín:** 🔺 36°C / 🔻 25°C");
+        assertThat(description).contains("♨️ **Sensação:** 32°C");
+        assertThat(description).contains("💨 **Vento Máx:** 10.5 km/h");
+        assertThat(description).contains("🌧️ **Chuva:** 84% (4.0 mm)");
+        assertThat(description).contains("💧 **Umidade:** 75%");
+        assertThat(description).contains("☀️ **Índice UV:** 9.1");
+        assertThat(description).contains("📅 **Data:** Quarta, 14/10/2026");
 
         assertThat((List<?>) embed.get("fields")).isEmpty();
 
@@ -68,11 +70,16 @@ class WeatherLayoutBuilderTest {
         DailyForecast day0 = new DailyForecast(LocalDate.of(2026, 10, 14), 0, 20.0, 10.0, 20.0, 10.0, null, 0.0, 0, 10.0);
         DailyForecast day1 = new DailyForecast(LocalDate.of(2026, 10, 15), 3, 19.0, 11.0, 19.0, 11.0, 5.0, 1.0, 30, 8.0);
 
-        WeatherSession session = new WeatherSession("s2", "g1", "c1", "u1", "m1", location, 1, List.of(day0, day1), Instant.now().plusSeconds(3600));
+        WeatherSession session = new WeatherSession("s2", "g1", "c1", "u1", "m1", location, 1, List.of(day0, day1), null, Instant.now().plusSeconds(3600));
 
         var rendered = builder.render(session, null);
 
         assertThat(rendered.embeds()).hasSize(1);
+        String desc = rendered.embeds().get(0).get("description").toString();
+        assertThat(desc).contains("**☁️ Encoberto**");
+        assertThat(desc).contains("♨️ **Sensação:** 🔺 19°C / 🔻 11°C");
+        assertThat(desc).contains("☀️ **Índice UV:** 5.0");
+
         List<?> buttons = (List<?>) rendered.components().get(0).get("components");
         Map<?, ?> prevButton = (Map<?, ?>) buttons.get(0);
         assertThat(prevButton.get("disabled")).isEqualTo(false);
@@ -94,7 +101,7 @@ class WeatherLayoutBuilderTest {
         for (int i = 0; i < 7; i++) {
             LocalDate date = start.plusDays(i);
             DailyForecast day = new DailyForecast(date, 0, 25.0, 15.0, 25.0, 15.0, 5.0, 0.0, 0, 5.0);
-            WeatherSession session = new WeatherSession("s" + i, "g", "c", "u", "m", location, 0, List.of(day), Instant.now());
+            WeatherSession session = new WeatherSession("s" + i, "g", "c", "u", "m", location, 0, List.of(day), null, Instant.now());
             var rendered = builder.render(session, null);
             String desc = rendered.embeds().get(0).get("description").toString();
             String expectedDay = switch (date.getDayOfWeek()) {

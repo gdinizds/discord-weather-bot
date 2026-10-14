@@ -34,19 +34,40 @@ public class WeatherLayoutBuilder {
 
         Map<String, Object> embed = new HashMap<>();
         embed.put("color", condition.colorHex());
-        embed.put("title", condition.emoji() + " Clima em " + location.displayName());
+        embed.put("title", "Clima em " + location.displayName());
 
         StringBuilder desc = new StringBuilder();
-        desc.append(formatTemp(targetDay.tempMax())).append(" / ").append(formatTemp(targetDay.tempMin()))
-                .append(" — ").append(condition.emoji()).append(" ").append(condition.description()).append("\n");
-        desc.append("🌡️ Máx / Mín:🔺 ").append(formatTemp(targetDay.tempMax())).append(" / 🔻 ").append(formatTemp(targetDay.tempMin())).append("\n");
-        desc.append("💨 Vento Máx: ").append(targetDay.windSpeedMax()).append(" km/h\n");
-        desc.append("🌧️ Chuva: ").append(targetDay.precipitationProbabilityMax()).append("% (").append(targetDay.precipitationSum()).append(" mm)\n");
-        if (targetDay.uvIndexMax() != null) {
-            desc.append("☀️ Índice UV: ").append(String.format(Locale.US, "%.1f", targetDay.uvIndexMax())).append("\n");
+        if (index == 0 && current != null) {
+            desc.append("**").append(formatTemp(current.temperature())).append(" - ")
+                    .append(condition.emoji()).append(" ").append(condition.description()).append("**\n");
+        } else {
+            desc.append("**").append(condition.emoji()).append(" ").append(condition.description()).append("**\n");
         }
-        desc.append("📅 Data\n");
-        desc.append(formatDayOfWeek(targetDay.date().getDayOfWeek())).append(", ").append(targetDay.date().format(DATE_FORMATTER));
+
+        desc.append("🌡️ **Máx / Mín:** 🔺 ").append(formatTemp(targetDay.tempMax()))
+                .append(" / 🔻 ").append(formatTemp(targetDay.tempMin())).append("\n");
+
+        if (index == 0 && current != null) {
+            desc.append("♨️ **Sensação:** ").append(formatTemp(current.apparentTemperature())).append("\n");
+        } else {
+            desc.append("♨️ **Sensação:** 🔺 ").append(formatTemp(targetDay.apparentTempMax()))
+                    .append(" / 🔻 ").append(formatTemp(targetDay.apparentTempMin())).append("\n");
+        }
+
+        desc.append("💨 **Vento Máx:** ").append(targetDay.windSpeedMax()).append(" km/h\n");
+        desc.append("🌧️ **Chuva:** ").append(targetDay.precipitationProbabilityMax())
+                .append("% (").append(targetDay.precipitationSum()).append(" mm)\n");
+
+        if (index == 0 && current != null) {
+            desc.append("💧 **Umidade:** ").append(current.relativeHumidity()).append("%\n");
+        }
+
+        if (targetDay.uvIndexMax() != null) {
+            desc.append("☀️ **Índice UV:** ").append(String.format(Locale.US, "%.1f", targetDay.uvIndexMax())).append("\n");
+        }
+
+        desc.append("📅 **Data:** ").append(formatDayOfWeek(targetDay.date().getDayOfWeek()))
+                .append(", ").append(targetDay.date().format(DATE_FORMATTER));
 
         embed.put("description", desc.toString());
         embed.put("fields", List.of());

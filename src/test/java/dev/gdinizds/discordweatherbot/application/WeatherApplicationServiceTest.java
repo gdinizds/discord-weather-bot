@@ -155,7 +155,7 @@ class WeatherApplicationServiceTest {
     @Test
     void shouldNavigateNextDay() {
         WeatherSession session = new WeatherSession(
-                "sess1", "g1", "ch1", "u1", "msg1", sampleLocation, 0, sampleDaily, Instant.now().plusSeconds(3600)
+                "sess1", "g1", "ch1", "u1", "msg1", sampleLocation, 0, sampleDaily, sampleCurrent, Instant.now().plusSeconds(3600)
         );
         WeatherNavigationCommand command = new WeatherNavigationCommand(
                 "c5", "g1", "ch1", "u1", "tok5", "msg1", "sess1", "next", "{}"
@@ -192,7 +192,7 @@ class WeatherApplicationServiceTest {
     @Test
     void shouldRejectNavigationWhenUserIsNotOriginalRequester() {
         WeatherSession session = new WeatherSession(
-                "sess1", "g1", "ch1", "uOriginal", "msg1", sampleLocation, 0, sampleDaily, Instant.now().plusSeconds(3600)
+                "sess1", "g1", "ch1", "uOriginal", "msg1", sampleLocation, 0, sampleDaily, sampleCurrent, Instant.now().plusSeconds(3600)
         );
         WeatherNavigationCommand command = new WeatherNavigationCommand(
                 "c7", "g1", "ch1", "uDifferent", "tok7", "msg1", "sess1", "next", "{}"

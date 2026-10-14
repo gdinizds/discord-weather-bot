@@ -119,6 +119,7 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
                     location,
                     0,
                     forecast.daily(),
+                    forecast.current(),
                     Instant.now().plus(sessionTtl)
             );
             weatherSessionPort.save(session);
@@ -281,7 +282,7 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
             WeatherSession updatedSession = session.withCurrentDayIndex(targetIndex);
             weatherSessionPort.save(updatedSession);
 
-            RenderedWeather rendered = layoutBuilder.render(updatedSession, null);
+            RenderedWeather rendered = layoutBuilder.render(updatedSession, updatedSession.current());
             replyPublisher.publish(OutboundResponse.updateMessage(
                     command.interactionToken(),
                     command.originMessageId(),

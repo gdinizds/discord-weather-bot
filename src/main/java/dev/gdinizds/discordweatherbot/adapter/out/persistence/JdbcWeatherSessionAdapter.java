@@ -2,6 +2,7 @@ package dev.gdinizds.discordweatherbot.adapter.out.persistence;
 
 import dev.gdinizds.discordweatherbot.application.port.out.WeatherSessionPort;
 import dev.gdinizds.discordweatherbot.config.Resilience;
+import dev.gdinizds.discordweatherbot.domain.model.CurrentWeather;
 import dev.gdinizds.discordweatherbot.domain.model.DailyForecast;
 import dev.gdinizds.discordweatherbot.domain.model.Location;
 import dev.gdinizds.discordweatherbot.domain.model.WeatherSession;
@@ -60,7 +61,7 @@ public class JdbcWeatherSessionAdapter implements WeatherSessionPort {
 
     @Override
     public void save(WeatherSession session) {
-        String forecastJson = serializeForecast(session.daily());
+        String forecastJson = serializeForecast(session.current(), session.daily());
         resilience.run(INSTANCE, () -> jdbcTemplate.update(
                 UPSERT_SESSION,
                 session.sessionId(),
@@ -80,19 +81,28 @@ public class JdbcWeatherSessionAdapter implements WeatherSessionPort {
         ));
     }
 
-    private String serializeForecast(List<DailyForecast> daily) {
+    private record ForecastPayload(CurrentWeather current, List<DailyForecast> daily) {}
+
+    private String serializeForecast(CurrentWeather current, List<DailyForecast> daily) {
         try {
-            return objectMapper.writeValueAsString(daily);
+            return objectMapper.writeValueAsString(new ForecastPayload(current, daily));
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to serialize forecast daily list: " + e.getMessage(), e);
+            throw new IllegalStateException("Failed to serialize forecast: " + e.getMessage(), e);
         }
     }
 
-    private List<DailyForecast> deserializeForecast(String json) {
+    private ForecastPayload deserializeForecast(String json) {
         try {
-            return objectMapper.readValue(json, new TypeReference<List<DailyForecast>>() {});
+            if (json == null || json.isBlank()) {
+                return new ForecastPayload(null, List.of());
+            }
+            if (json.trim().startsWith("[")) {
+                List<DailyForecast> daily = objectMapper.readValue(json, new TypeReference<List<DailyForecast>>() {});
+                return new ForecastPayload(null, daily);
+            }
+            return objectMapper.readValue(json, ForecastPayload.class);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to deserialize forecast daily list: " + e.getMessage(), e);
+            throw new IllegalStateException("Failed to deserialize forecast: " + e.getMessage(), e);
         }
     }
 
@@ -107,7 +117,7 @@ public class JdbcWeatherSessionAdapter implements WeatherSessionPort {
                     rs.getDouble("longitude"),
                     rs.getString("timezone")
             );
-            List<DailyForecast> daily = deserializeForecast(rs.getString("forecast_json"));
+            ForecastPayload payload = deserializeForecast(rs.getString("forecast_json"));
             return new WeatherSession(
                     rs.getString("session_id"),
                     rs.getString("guild_id"),
@@ -116,7 +126,8 @@ public class JdbcWeatherSessionAdapter implements WeatherSessionPort {
                     rs.getString("origin_message_id"),
                     location,
                     rs.getInt("current_day_index"),
-                    daily,
+                    payload.daily(),
+                    payload.current(),
                     rs.getTimestamp("expires_at").toInstant()
             );
         }

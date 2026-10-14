@@ -58,7 +58,7 @@ class JdbcWeatherSessionAdapterTest {
         Location location = new Location("Recife", "PE", "Brasil", -8.05, -34.88, "America/Recife");
         DailyForecast day = new DailyForecast(LocalDate.now(), 0, 30.0, 24.0, 32.0, 25.0, 9.0, 0.0, 5, 20.0);
         WeatherSession expected = new WeatherSession(
-                "sess-100", "g1", "ch1", "u1", "m1", location, 0, List.of(day), Instant.now().plusSeconds(3600)
+                "sess-100", "g1", "ch1", "u1", "m1", location, 0, List.of(day), null, Instant.now().plusSeconds(3600)
         );
 
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("sess-100")))
@@ -84,7 +84,7 @@ class JdbcWeatherSessionAdapterTest {
         Location location = new Location("Recife", "PE", "Brasil", -8.05, -34.88, "America/Recife");
         DailyForecast day = new DailyForecast(LocalDate.now(), 0, 30.0, 24.0, 32.0, 25.0, 9.0, 0.0, 5, 20.0);
         WeatherSession session = new WeatherSession(
-                "sess-100", "g1", "ch1", "u1", "m1", location, 0, List.of(day), Instant.now().plusSeconds(3600)
+                "sess-100", "g1", "ch1", "u1", "m1", location, 0, List.of(day), null, Instant.now().plusSeconds(3600)
         );
 
         adapter.save(session);
