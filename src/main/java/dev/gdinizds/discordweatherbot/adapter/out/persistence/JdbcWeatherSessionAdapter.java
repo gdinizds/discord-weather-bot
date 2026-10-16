@@ -81,6 +81,17 @@ public class JdbcWeatherSessionAdapter implements WeatherSessionPort {
         ));
     }
 
+    @Override
+    public int countActive() {
+        return resilience.call(INSTANCE, () -> {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM weather_bot.weather_sessions WHERE expires_at > NOW()",
+                    Integer.class
+            );
+            return count != null ? count : 0;
+        });
+    }
+
     private record ForecastPayload(CurrentWeather current, List<DailyForecast> daily) {}
 
     private String serializeForecast(CurrentWeather current, List<DailyForecast> daily) {

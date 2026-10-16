@@ -7,6 +7,7 @@ import dev.gdinizds.discordweatherbot.application.port.out.ReplyPublisherPort;
 import dev.gdinizds.discordweatherbot.application.port.out.UserWeatherConfigPort;
 import dev.gdinizds.discordweatherbot.application.port.out.WeatherAuditLogPort;
 import dev.gdinizds.discordweatherbot.application.port.out.WeatherClientPort;
+import dev.gdinizds.discordweatherbot.application.port.out.WeatherMetricsPort;
 import dev.gdinizds.discordweatherbot.application.port.out.WeatherSessionPort;
 import dev.gdinizds.discordweatherbot.domain.model.ConfigureWeatherCommand;
 import dev.gdinizds.discordweatherbot.domain.model.Location;
@@ -37,6 +38,7 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
     private final WeatherAuditLogPort weatherAuditLogPort;
     private final ReplyPublisherPort replyPublisher;
     private final WeatherLayoutBuilder layoutBuilder;
+    private final WeatherMetricsPort metricsPort;
     private final Duration sessionTtl;
 
     public WeatherApplicationService(WeatherClientPort weatherClient,
@@ -46,12 +48,25 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
                                      ReplyPublisherPort replyPublisher,
                                      WeatherLayoutBuilder layoutBuilder,
                                      Duration sessionTtl) {
+        this(weatherClient, userWeatherConfigPort, weatherSessionPort, weatherAuditLogPort,
+                replyPublisher, layoutBuilder, WeatherMetricsPort.NOOP, sessionTtl);
+    }
+
+    public WeatherApplicationService(WeatherClientPort weatherClient,
+                                     UserWeatherConfigPort userWeatherConfigPort,
+                                     WeatherSessionPort weatherSessionPort,
+                                     WeatherAuditLogPort weatherAuditLogPort,
+                                     ReplyPublisherPort replyPublisher,
+                                     WeatherLayoutBuilder layoutBuilder,
+                                     WeatherMetricsPort metricsPort,
+                                     Duration sessionTtl) {
         this.weatherClient = weatherClient;
         this.userWeatherConfigPort = userWeatherConfigPort;
         this.weatherSessionPort = weatherSessionPort;
         this.weatherAuditLogPort = weatherAuditLogPort;
         this.replyPublisher = replyPublisher;
         this.layoutBuilder = layoutBuilder;
+        this.metricsPort = metricsPort != null ? metricsPort : WeatherMetricsPort.NOOP;
         this.sessionTtl = sessionTtl;
     }
 
@@ -79,6 +94,8 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
                     recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                             "clima", command.triggerType(), "DEFAULT", null, "UNCONFIGURED",
                             command.rawPayload(), null, System.currentTimeMillis() - start);
+                    metricsPort.recordRequest("clima", "unconfigured");
+                    metricsPort.recordLatency("clima", Duration.ofMillis(System.currentTimeMillis() - start));
                     return;
                 }
 
@@ -103,10 +120,16 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
                 recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                         "clima", command.triggerType(), queryLocation, null, "NOT_FOUND",
                         command.rawPayload(), null, System.currentTimeMillis() - start);
+                metricsPort.recordGeocoding("location", "not_found");
+                metricsPort.recordRequest("clima", "not_found");
+                metricsPort.recordLatency("clima", Duration.ofMillis(System.currentTimeMillis() - start));
                 return;
             }
 
             Location location = locationOpt.get();
+            boolean isCep = queryLocation != null && queryLocation.trim().matches("\\d{5}-?\\d{3}");
+            metricsPort.recordGeocoding(isCep ? "brasilapi" : "openmeteo", "success");
+
             WeatherForecast forecast = weatherClient.fetchForecast(location);
 
             String sessionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
@@ -138,6 +161,8 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
             recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                     "clima", command.triggerType(), queryLocation, location.displayName(), "SUCCESS",
                     command.rawPayload(), "sessionId=" + sessionId, System.currentTimeMillis() - start);
+            metricsPort.recordRequest("clima", "success");
+            metricsPort.recordLatency("clima", Duration.ofMillis(System.currentTimeMillis() - start));
 
         } catch (Exception e) {
             log.error("Failed to execute weather query [correlationId={}]: {}", command.correlationId(), e.getMessage(), e);
@@ -154,6 +179,8 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
             recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                     "clima", command.triggerType(), queryLocation, null, "ERROR",
                     command.rawPayload(), e.getMessage(), System.currentTimeMillis() - start);
+            metricsPort.recordRequest("clima", "error");
+            metricsPort.recordLatency("clima", Duration.ofMillis(System.currentTimeMillis() - start));
         }
     }
 
@@ -176,6 +203,8 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
                 recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                         "clima-config", command.triggerType(), null, null, "CONFIG_EMPTY",
                         command.rawPayload(), null, System.currentTimeMillis() - start);
+                metricsPort.recordRequest("config", "empty");
+                metricsPort.recordLatency("config", Duration.ofMillis(System.currentTimeMillis() - start));
                 return;
             }
 
@@ -193,10 +222,16 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
                 recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                         "clima-config", command.triggerType(), local, null, "CONFIG_NOT_FOUND",
                         command.rawPayload(), null, System.currentTimeMillis() - start);
+                metricsPort.recordGeocoding("location", "not_found");
+                metricsPort.recordRequest("config", "not_found");
+                metricsPort.recordLatency("config", Duration.ofMillis(System.currentTimeMillis() - start));
                 return;
             }
 
             Location location = locationOpt.get();
+            boolean isCep = local.trim().matches("\\d{5}-?\\d{3}");
+            metricsPort.recordGeocoding(isCep ? "brasilapi" : "openmeteo", "success");
+
             UserWeatherConfig config = UserWeatherConfig.create(command.userId(), location);
             userWeatherConfigPort.save(config);
 
@@ -213,6 +248,8 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
             recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                     "clima-config", command.triggerType(), local, location.displayName(), "CONFIG_SAVED",
                     command.rawPayload(), null, System.currentTimeMillis() - start);
+            metricsPort.recordRequest("config", "success");
+            metricsPort.recordLatency("config", Duration.ofMillis(System.currentTimeMillis() - start));
 
         } catch (Exception e) {
             log.error("Failed to configure user weather [correlationId={}]: {}", command.correlationId(), e.getMessage(), e);
@@ -228,6 +265,8 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
             recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                     "clima-config", command.triggerType(), local, null, "ERROR",
                     command.rawPayload(), e.getMessage(), System.currentTimeMillis() - start);
+            metricsPort.recordRequest("config", "error");
+            metricsPort.recordLatency("config", Duration.ofMillis(System.currentTimeMillis() - start));
         }
     }
 
@@ -250,6 +289,7 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
                 recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                         "weather_button", "BUTTON", command.sessionId(), null, "EXPIRED",
                         command.rawPayload(), null, System.currentTimeMillis() - start);
+                metricsPort.recordNavigationClick(command.action(), "expired");
                 return;
             }
 
@@ -266,6 +306,7 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
                 recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                         "weather_button", "BUTTON", command.sessionId(), null, "FORBIDDEN",
                         command.rawPayload(), "User " + command.userId() + " not authorized for session of user " + session.userId(), System.currentTimeMillis() - start);
+                metricsPort.recordNavigationClick(command.action(), "forbidden");
                 return;
             }
 
@@ -296,6 +337,7 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
             recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                     "weather_button", "BUTTON", command.sessionId(), updatedSession.location().displayName(), "NAVIGATED",
                     command.rawPayload(), "day=" + targetIndex, System.currentTimeMillis() - start);
+            metricsPort.recordNavigationClick(command.action(), "success");
 
         } catch (Exception e) {
             log.error("Failed to navigate weather [sessionId={}]: {}", command.sessionId(), e.getMessage(), e);
@@ -312,6 +354,7 @@ public class WeatherApplicationService implements ExecuteWeatherQueryUseCase, Co
             recordAudit(command.correlationId(), command.guildId(), command.channelId(), command.userId(),
                     "weather_button", "BUTTON", command.sessionId(), null, "ERROR",
                     command.rawPayload(), e.getMessage(), System.currentTimeMillis() - start);
+            metricsPort.recordNavigationClick(command.action(), "error");
         }
     }
 

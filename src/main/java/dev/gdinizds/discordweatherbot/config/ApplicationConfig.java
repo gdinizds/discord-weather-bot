@@ -17,6 +17,9 @@ import dev.gdinizds.discordweatherbot.application.port.out.WeatherClientPort;
 import dev.gdinizds.discordweatherbot.application.port.out.WeatherSessionPort;
 import dev.gdinizds.discordweatherbot.application.service.WeatherApplicationService;
 import dev.gdinizds.discordweatherbot.domain.service.WeatherLayoutBuilder;
+import dev.gdinizds.discordweatherbot.adapter.out.metrics.MicrometerMetrics;
+import dev.gdinizds.discordweatherbot.application.port.out.WeatherMetricsPort;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.github.resilience4j.bulkhead.Bulkhead;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -83,12 +86,18 @@ public class ApplicationConfig {
     }
 
     @Bean
+    public WeatherMetricsPort weatherMetricsPort(MeterRegistry meterRegistry, WeatherSessionPort weatherSessionPort) {
+        return new MicrometerMetrics(meterRegistry, weatherSessionPort);
+    }
+
+    @Bean
     public WeatherApplicationService weatherApplicationService(WeatherClientPort weatherClient,
                                                                UserWeatherConfigPort userWeatherConfigPort,
                                                                WeatherSessionPort weatherSessionPort,
                                                                WeatherAuditLogPort weatherAuditLogPort,
                                                                ReplyPublisherPort replyPublisher,
                                                                WeatherLayoutBuilder layoutBuilder,
+                                                               WeatherMetricsPort weatherMetricsPort,
                                                                WeatherBotProperties properties) {
         return new WeatherApplicationService(
                 weatherClient,
@@ -97,6 +106,7 @@ public class ApplicationConfig {
                 weatherAuditLogPort,
                 replyPublisher,
                 layoutBuilder,
+                weatherMetricsPort,
                 properties.session().ttl()
         );
     }
