@@ -10,16 +10,29 @@ import java.time.Duration;
 public class MicrometerMetrics implements WeatherMetricsPort {
 
     private final MeterRegistry registry;
+    private final WeatherSessionPort sessionPort;
+    private volatile int cachedActiveSessions = 0;
+    private volatile long lastCheckTimeMs = 0;
+    private static final long CACHE_TTL_MS = 60_000;
 
     public MicrometerMetrics(MeterRegistry registry, WeatherSessionPort sessionPort) {
         this.registry = registry;
-        Gauge.builder("discord.weatherbot.sessions.active", () -> {
+        this.sessionPort = sessionPort;
+        Gauge.builder("discord.weatherbot.sessions.active", this, MicrometerMetrics::getActiveSessionsCached)
+                .description("Active weather user navigation sessions")
+                .register(registry);
+    }
+
+    private int getActiveSessionsCached() {
+        long now = System.currentTimeMillis();
+        if (now - lastCheckTimeMs > CACHE_TTL_MS) {
             try {
-                return sessionPort.countActive();
-            } catch (Exception e) {
-                return 0;
+                cachedActiveSessions = sessionPort.countActive();
+                lastCheckTimeMs = now;
+            } catch (Exception ignored) {
             }
-        }).description("Active weather user navigation sessions").register(registry);
+        }
+        return cachedActiveSessions;
     }
 
     @Override

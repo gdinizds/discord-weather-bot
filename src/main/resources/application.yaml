@@ -113,6 +113,9 @@ resilience4j:
       weather:
         max-concurrent-calls: 32
         max-wait-duration: 0
+      database:
+        max-concurrent-calls: 10
+        max-wait-duration: 2s
 
 management:
   endpoints:
@@ -121,7 +124,7 @@ management:
         include: health, info, prometheus, metrics, circuitbreakers
   endpoint:
     health:
-      show-details: always
+      show-details: never
       validate-group-membership: false
       probes:
         enabled: true
