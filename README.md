@@ -209,7 +209,8 @@ src/
 │   └── resources/
 │       ├── application.yaml
 │       └── db/migration/
-│           └── V1__init_weather_schema.sql
+│           ├── V1__init_weather_schema.sql
+│           └── V2__partition_audit_log_and_cleanup_indexes.sql
 └── test/
     └── java/dev/gdinizds/discordweatherbot/
         ├── arch/ArchitectureTest.java            # ArchUnit validando arquitetura hexagonal
@@ -285,14 +286,15 @@ A resposta do bot é estruturada com Embeds ricos e dinâmicos:
 
 ---
 
-## 📊 Persistência e Tabela de Auditoria (PostgreSQL)
+## 📊 Persistência, Particionamento e Governança de Dados (PostgreSQL)
 
-O schema `weather_bot` é versionado via **Flyway** e armazena:
+O schema `weather_bot` é versionado via **Flyway** e adota particionamento temporal avançado e ciclo de expurgo automatizado nativamente no PostgreSQL:
 
 ```sql
+-- Configuração de favoritos por usuário
 CREATE TABLE weather_bot.user_weather_config (
     id BIGSERIAL PRIMARY KEY,
-    user_id VARCHAR(32) NOT NULL UNIQUE,
+    user_id VARCHAR(32) NOT NULL CONSTRAINT uk_user_weather_config_user_id UNIQUE,
     city VARCHAR(128) NOT NULL,
     state VARCHAR(64),
     country VARCHAR(64),
@@ -303,9 +305,10 @@ CREATE TABLE weather_bot.user_weather_config (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Sessões interativas dos botões (otimizada com fillfactor 85 para HOT updates)
 CREATE TABLE weather_bot.weather_sessions (
     id BIGSERIAL PRIMARY KEY,
-    session_id VARCHAR(64) NOT NULL UNIQUE,
+    session_id VARCHAR(64) NOT NULL CONSTRAINT uk_weather_sessions_session_id UNIQUE,
     guild_id VARCHAR(32),
     channel_id VARCHAR(32),
     user_id VARCHAR(32) NOT NULL,
@@ -321,10 +324,11 @@ CREATE TABLE weather_bot.weather_sessions (
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+) WITH (fillfactor = 85);
 
+-- Tabela de auditoria particionada por range de data (pg_partman)
 CREATE TABLE weather_bot.weather_audit_log (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGINT GENERATED ALWAYS AS IDENTITY,
     correlation_id VARCHAR(64) NOT NULL,
     guild_id VARCHAR(32),
     channel_id VARCHAR(32),
@@ -337,9 +341,51 @@ CREATE TABLE weather_bot.weather_audit_log (
     raw_request TEXT,
     raw_response TEXT,
     execution_time_ms BIGINT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, created_at)
+) PARTITION BY RANGE (created_at);
+
+CREATE INDEX idx_weather_audit_correlation_id ON weather_bot.weather_audit_log (correlation_id);
+CREATE INDEX idx_weather_audit_user_id ON weather_bot.weather_audit_log (user_id);
+CREATE INDEX idx_weather_audit_created_at ON weather_bot.weather_audit_log (created_at DESC);
 ```
+
+### Automação de Banco de Dados com `pg_partman` e `pg_cron`
+
+Em conformidade com as melhores práticas de banco de dados, **nenhuma deleção ou manutenção de partições roda via código Java / Spring `@Scheduled`**. Todas as rotinas são executadas pelo PostgreSQL via `pg_cron` no banco central `app`:
+
+1. **Particionamento Diário e Retenção (`pg_partman`):**
+   - Tabela particionada diariamente com `premake = 3` e retenção estrita de **30 dias**.
+   - Job `partman-maintenance-discord-weather-bot` agendado no `pg_cron` a cada hora (`35 * * * *`):
+     ```sql
+     SELECT cron.schedule_in_database('partman-maintenance-discord-weather-bot', '35 * * * *', 'SELECT partman.run_maintenance(p_analyze := FALSE)', 'discord_weather_bot', 'postgres');
+     ```
+2. **Expurgo Automático de Sessões Expiradas:**
+   - Job `purge-weather-sessions` agendado no `pg_cron` a cada 15 minutos (`*/15 * * * *`):
+     ```sql
+     SELECT cron.schedule_in_database('purge-weather-sessions', '*/15 * * * *', 'DELETE FROM weather_bot.weather_sessions WHERE expires_at < NOW()', 'discord_weather_bot', 'postgres');
+     ```
+3. **HOT (Heap-Only Tuples) Updates:**
+   - `weather_sessions` configurada com `fillfactor = 85`, permitindo que atualizações de página (`current_day_index`, `updated_at`) ocorram no mesmo bloco sem gerar fragmentação ou atualizações em índices.
+   - Remoção de índices secundários redundantes já cobertos pelas constraints `UNIQUE`.
+
+---
+
+## 📨 Mensageria de Alta Performance (Redpanda / Kafka)
+
+O consumo e produção de eventos foi ajustado para máxima vazão e tolerância a falhas sobre o cluster Redpanda de 3 nós:
+
+- **Concorrência Alinhada (3 Partições):**
+  - Listener configurado com `concurrency = 3`, garantindo 1 consumidor dedicado por partição do tópico sem contenção.
+  - Rebalanceamento não-destrutivo com `CooperativeStickyAssignor`.
+- **Confirmação Manual de Offset (`MANUAL_IMMEDIATE`):**
+  - Integração com `Acknowledgment` nos listeners acoplada ao ciclo de vida das Virtual Threads. O commit do offset só ocorre após a conclusão da execução com sucesso ou descarte explícito de mensagens não reconhecidas.
+- **Isolamento de Poison Pills (Dead Letter Topic):**
+  - Integração do `DeadLetterPublishingRecoverer` publicando mensagens irrecuperáveis no tópico correspondente `.DLT`.
+  - `DefaultErrorHandler` com `FixedBackOff(1000L, 2)` para retentativas imediatas antes de encaminhar ao DLT.
+- **Otimização de Throughput do Producer:**
+  - `enable.idempotence = true` para garantia estrita de entrega exactly-once sem duplicações.
+  - Compressão `lz4`, `linger.ms = 5` e `batch.size = 32768` para agregação de batch de alto rendimento.
 
 ---
 
@@ -385,9 +431,14 @@ Benefícios da execução nativa:
 O ciclo de vida no cluster é gerenciado através do repositório GitOps [fleet-infra](https://github.com/gdinizds/fleet-infra.git):
 
 - **Injeção de Segredos pelo HashiCorp Vault:**
-  - Banco de Dados: `secret/discord-weather-bot/db`
+  - Banco de Dados: `secret/discord-weather-bot/db` (injetado em `/vault/secrets/db.yaml`).
 - **Configurações Centralizadas no Consul:**
   - Carregadas automaticamente via Spring Cloud Consul Config em `consul-server.consul.svc.cluster.local:8500`.
+- **Hardening de Segurança e Isolamento:**
+  - Sistema de arquivos somente leitura: `readOnlyRootFilesystem: true`.
+  - Execução não-root com UID dedicado (`runAsUser: 1001`), `allowPrivilegeEscalation: false` e drop total de capabilities (`drop: ["ALL"]`).
+  - Restrição do Spring Boot Actuator (`show-details: never`).
+  - Isolamento de rede estrito via `NetworkPolicy` dedicada no namespace `discord-weather-bot`.
 - **Image Update Automation do Flux:**
   - A cada nova tag gerada no GitHub (`v*.*.*`), o GitHub Actions constrói a imagem no GHCR e o Flux aplica a atualização no cluster via RollingUpdate.
 
