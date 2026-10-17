@@ -13,6 +13,7 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
 import tools.jackson.databind.ObjectMapper;
@@ -60,58 +61,91 @@ public class InboundEventConsumer implements DisposableBean {
 
     @KafkaListener(topics = "${weather-bot.topics.inbound-interactions}", containerFactory = "kafkaListenerContainerFactory")
     public void onInteractionCommand(@Payload String payload,
-                                     @Header(name = "command-name", required = false) String commandName) {
-        if (!"clima".equals(commandName) && !"clima-config".equals(commandName)) return;
+                                     @Header(name = "command-name", required = false) String commandName,
+                                     Acknowledgment ack) {
+        if (!"clima".equals(commandName) && !"clima-config".equals(commandName)) {
+            ackIfPresent(ack);
+            return;
+        }
 
-        parse(payload).ifPresent(event -> {
+        parse(payload).ifPresentOrElse(event -> {
             if ("clima-config".equals(commandName)) {
                 ConfigureWeatherCommand command = mapper.toConfigureCommand(event, payload);
-                dispatch(() -> withMdc(command.correlationId(), command.guildId(), "SLASH", () -> configureUseCase.configure(command)));
+                dispatch(() -> withMdc(command.correlationId(), command.guildId(), "SLASH", () -> configureUseCase.configure(command)), ack);
             } else {
                 WeatherQueryCommand command = mapper.toWeatherQueryCommand(event, payload);
-                dispatch(() -> withMdc(command.correlationId(), command.guildId(), "SLASH", () -> queryUseCase.execute(command)));
+                dispatch(() -> withMdc(command.correlationId(), command.guildId(), "SLASH", () -> queryUseCase.execute(command)), ack);
             }
-        });
+        }, () -> ackIfPresent(ack));
+    }
+
+    public void onInteractionCommand(String payload, String commandName) {
+        onInteractionCommand(payload, commandName, null);
     }
 
     @KafkaListener(topics = "${weather-bot.topics.inbound-commands}", containerFactory = "kafkaListenerContainerFactory")
     public void onMessageCommand(@Payload String payload,
-                                 @Header(name = "command-name", required = false) String commandName) {
-        if (!"clima".equals(commandName) && !"clima-config".equals(commandName)) return;
+                                 @Header(name = "command-name", required = false) String commandName,
+                                 Acknowledgment ack) {
+        if (!"clima".equals(commandName) && !"clima-config".equals(commandName)) {
+            ackIfPresent(ack);
+            return;
+        }
 
-        parse(payload).ifPresent(event -> {
+        parse(payload).ifPresentOrElse(event -> {
             Object command = mapper.fromDotCommand(event, commandName, payload);
             if (command instanceof ConfigureWeatherCommand cfg) {
-                dispatch(() -> withMdc(cfg.correlationId(), cfg.guildId(), "DOT", () -> configureUseCase.configure(cfg)));
+                dispatch(() -> withMdc(cfg.correlationId(), cfg.guildId(), "DOT", () -> configureUseCase.configure(cfg)), ack);
             } else if (command instanceof WeatherQueryCommand qry) {
-                dispatch(() -> withMdc(qry.correlationId(), qry.guildId(), "DOT", () -> queryUseCase.execute(qry)));
+                dispatch(() -> withMdc(qry.correlationId(), qry.guildId(), "DOT", () -> queryUseCase.execute(qry)), ack);
+            } else {
+                ackIfPresent(ack);
             }
-        });
+        }, () -> ackIfPresent(ack));
+    }
+
+    public void onMessageCommand(String payload, String commandName) {
+        onMessageCommand(payload, commandName, null);
     }
 
     @KafkaListener(topics = "${weather-bot.topics.inbound-buttons}", containerFactory = "kafkaListenerContainerFactory")
-    public void onButtonInteraction(@Payload String payload) {
-        parse(payload).ifPresent(event -> {
-            if (event.rawPayload() == null) return;
+    public void onButtonInteraction(@Payload String payload, Acknowledgment ack) {
+        parse(payload).ifPresentOrElse(event -> {
+            if (event.rawPayload() == null) {
+                ackIfPresent(ack);
+                return;
+            }
             String compId = event.rawPayload().path("componentId").asString("");
             if (compId.isBlank()) compId = event.rawPayload().path("custom_id").asString("");
-            if (!compId.startsWith("weather:")) return;
+            if (!compId.startsWith("weather:")) {
+                ackIfPresent(ack);
+                return;
+            }
 
             WeatherNavigationCommand command = mapper.fromButton(event, payload);
-            dispatch(() -> withMdc(command.correlationId(), command.guildId(), "BUTTON", () -> navigateUseCase.navigate(command)));
-        });
+            dispatch(() -> withMdc(command.correlationId(), command.guildId(), "BUTTON", () -> navigateUseCase.navigate(command)), ack);
+        }, () -> ackIfPresent(ack));
     }
 
-    private void dispatch(Runnable task) {
+    public void onButtonInteraction(String payload) {
+        onButtonInteraction(payload, null);
+    }
+
+    private void dispatch(Runnable task, Acknowledgment ack) {
         if (!bulkhead.tryAcquirePermission()) {
             log.warn("Bulkhead rejected weather request due to high load");
+            ackIfPresent(ack);
             return;
         }
         submit(() -> {
             try {
                 task.run();
             } finally {
-                bulkhead.onComplete();
+                try {
+                    bulkhead.onComplete();
+                } finally {
+                    ackIfPresent(ack);
+                }
             }
         });
     }
@@ -136,6 +170,16 @@ public class InboundEventConsumer implements DisposableBean {
         if (inFlight.decrementAndGet() == 0) {
             synchronized (drained) {
                 drained.notifyAll();
+            }
+        }
+    }
+
+    private static void ackIfPresent(Acknowledgment ack) {
+        if (ack != null) {
+            try {
+                ack.acknowledge();
+            } catch (Exception e) {
+                log.warn("Failed to acknowledge Kafka message: {}", e.getMessage());
             }
         }
     }
