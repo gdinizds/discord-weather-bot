@@ -34,10 +34,19 @@ CREATE TABLE weather_bot.weather_audit_log (
     execution_time_ms BIGINT       NOT NULL,
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id, created_at)
-) PARTITION BY RANGE (created_at)
-WITH (fillfactor = 90);
+) PARTITION BY RANGE (created_at);
 
--- Migrate existing rows if any
+-- Create partition hierarchy starting from earliest historical record
+SELECT partman.create_parent(
+    p_parent_table    => 'weather_bot.weather_audit_log',
+    p_control         => 'created_at',
+    p_interval        => '1 day',
+    p_start_partition => '2026-10-14',
+    p_premake         => 3,
+    p_default_table   => true
+);
+
+-- Migrate existing rows into partitioned hierarchy
 INSERT INTO weather_bot.weather_audit_log (
     id, correlation_id, guild_id, channel_id, user_id, command_name, trigger_type,
     query_location, resolved_location, status, raw_request, raw_response, execution_time_ms, created_at
@@ -62,13 +71,7 @@ CREATE INDEX idx_weather_audit_user_id
 CREATE INDEX idx_weather_audit_created_at
     ON weather_bot.weather_audit_log (created_at DESC);
 
--- Configure pg_partman daily partitioning with 30-day retention
-SELECT partman.create_parent(
-    p_parent_table => 'weather_bot.weather_audit_log',
-    p_control      => 'created_at',
-    p_interval     => '1 day',
-    p_premake      => 3);
-
+-- Configure pg_partman retention to 30 days
 UPDATE partman.part_config
    SET retention = '30 days',
        retention_keep_table = false,
